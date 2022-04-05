@@ -8,6 +8,7 @@
 //
 // TUNING CONSTANTS
 //
+constexpr bool ENABLE_MPR121 = false;
 constexpr bool SLAVE_I2C_ADDRESS = 1;
 constexpr uint8_t PWM_STEPS = 64;  // NOTE: also change Shelf::set()
 
@@ -61,7 +62,11 @@ private:
 class TouchSlider {
 public:
   void init() {
-    MPR121.begin(0x5A);
+    if (!MPR121.begin(0x5A)) {
+      Serial.println("Failed to init MPR121 library");
+      return;
+    }
+
     MPR121.setFFI(FFI_10);
     MPR121.setSFI(SFI_10);
     MPR121.setGlobalCDT(CDT_500NS);
@@ -76,12 +81,20 @@ public:
   }
 
   void calibrate() {
+    if(!MPR121.isInited()) {
+      Serial.println("MPR121 Not inited: Refusing to calibrate");
+      return;
+    }
     MPR121.updateFilteredData();
     nominal_a_value = MPR121.getFilteredData(0);
     nominal_b_value = MPR121.getFilteredData(1);
   }
 
   bool read(float& value) {
+    if(!MPR121.isInited()) {
+      Serial.println("MPR121 Not inited: Refusing to read");
+      return false;
+    }
     bool touched = read_raw_slider(current_value);
     value = rolling_filter_value(current_value);
     return touched;
@@ -90,6 +103,11 @@ public:
   // Simple display update routine that performs delta updates to only
   // the needed LED's. I found the I2C requests to be slow.
   void update_display(float value) {
+    if(!MPR121.isInited()) {
+      Serial.println("MPR121 Not inited: Refusing to update display");
+      return;
+    }
+
     value = max(0, min(value, 1.0));
 
     // Compute new LED values
@@ -253,12 +271,14 @@ void setup()
   pinMode(13, OUTPUT);
 
   if (master) {
-    //Wire.begin();
-
     // Display master LED
     digitalWrite(13, HIGH);
 
-    slider.init();
+    if (ENABLE_MPR121) {
+      slider.init();  // Calls I2C Wire.begin(); for us
+    } else {
+      Wire.begin();
+    }
 
     for (uint8_t i = 0; i < NUM_SHELVES; i++) {
       pinMode(shelves[i].get_arduino_pin(), OUTPUT);
@@ -279,7 +299,6 @@ void setup()
     Wire.begin(SLAVE_I2C_ADDRESS);
   }
 
-
   // 16mhz (Arduino Clock) / 8 (Prescalar) / 255 (Output Compare Register) / 64 (Software Counter)
   //   =
   // ~120Hz PWM with 64 steps
@@ -296,17 +315,16 @@ void loop()
   uint8_t shelf_value = 0;  // 0-255
 
   if (master) {
-//    Wire.beginTransmission(SLAVE_I2C_ADDRESS);
-//    Wire.write(255);
-//    Wire.endTransmission();
-//    digitalWrite(13, HIGH);
-//    delay(1000);
-//    Wire.beginTransmission(SLAVE_I2C_ADDRESS);
-//    Wire.write(0);
-//    Wire.endTransmission();
-//    digitalWrite(13, LOW);
+    Wire.beginTransmission(SLAVE_I2C_ADDRESS);
+    Wire.write(255);
+    Wire.endTransmission();
+    digitalWrite(13, HIGH);
     delay(1000);
-    Serial.println("loop");
+    Wire.beginTransmission(SLAVE_I2C_ADDRESS);
+    Wire.write(0);
+    Wire.endTransmission();
+    digitalWrite(13, LOW);
+    delay(1000);
     return;
 
     // We are the master
