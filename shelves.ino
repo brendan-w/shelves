@@ -9,7 +9,6 @@
 // TUNING CONSTANTS
 //
 constexpr bool ENABLE_MPR121 = true;
-constexpr bool SLAVE_I2C_ADDRESS = 1;
 constexpr uint8_t PWM_STEPS = 64;  // NOTE: also change Shelf::set()
 
 // Slider tuning constants
@@ -262,16 +261,30 @@ ISR(TIMER2_COMPA_vect)
   }
 }
 
-void i2c_receive(int how_many) {
-  while(Wire.available())
-  {
-    shelf_value = Wire.read();
+void uart_send(uint8_t value) {
+  Serial.write('[');
+  Serial.write(value);
+  Serial.write(']');
+}
+
+void uart_receive(uint8_t& value) {
+  while (Serial.available() > 0) {
+    int c = Serial.read();
+    // If we find the start character, perform two more reads.
+    // One for the value, and one for the end character.
+    if (c == '[') {
+      uint8_t new_value = Serial.read();
+      if (Serial.read() == ']') {
+        // End character found, commit the value
+        value = new_value;
+      } // else discard everything and carry on
+    }
   }
 }
 
 void setup()
 {
-  Serial.begin(9600);
+  Serial.begin(115200);
 
   // Read personality pin
   pinMode(2, INPUT_PULLUP);
@@ -284,8 +297,6 @@ void setup()
 
     if (ENABLE_MPR121) {
       slider.init();  // Calls I2C Wire.begin() for us
-    } else {
-      Wire.begin();
     }
 
     for (uint8_t i = 0; i < NUM_SHELVES; i++) {
@@ -303,9 +314,6 @@ void setup()
       slider.update_display(v);
       delay(8);
     }
-  } else {
-    Wire.begin(SLAVE_I2C_ADDRESS);
-    Wire.onReceive(i2c_receive);
   }
 
   // 16mhz (Arduino Clock) / 8 (Prescalar) / 255 (Output Compare Register) / 64 (Software Counter)
@@ -331,10 +339,9 @@ void loop()
 
     // Convert to single byte [0-255] value
     shelf_value = max(0, min(fmap(value, 0.0, 1.0, 0, 255), 255));
-
-    Wire.beginTransmission(0 /* broadcast address */);
-    Wire.write(shelf_value);
-    Wire.endTransmission();
+    uart_send(shelf_value);
+  } else {
+    uart_receive(shelf_value);
   }
 
   for (int i = 0; i < NUM_SHELVES; i++) {
