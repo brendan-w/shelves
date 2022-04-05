@@ -8,7 +8,7 @@
 //
 // TUNING CONSTANTS
 //
-constexpr bool ENABLE_MPR121 = false;
+constexpr bool ENABLE_MPR121 = true;
 constexpr bool SLAVE_I2C_ADDRESS = 1;
 constexpr uint8_t PWM_STEPS = 64;  // NOTE: also change Shelf::set()
 
@@ -232,6 +232,7 @@ private:
 // GLOBALS
 //
 bool master = false;
+uint8_t shelf_value = 0;  // 0-255
 TouchSlider slider;
 
 // Used by the ISR to quickly set output pins
@@ -261,6 +262,13 @@ ISR(TIMER2_COMPA_vect)
   }
 }
 
+void i2c_receive(int how_many) {
+  while(Wire.available())
+  {
+    shelf_value = Wire.read();
+  }
+}
+
 void setup()
 {
   Serial.begin(9600);
@@ -275,7 +283,7 @@ void setup()
     digitalWrite(13, HIGH);
 
     if (ENABLE_MPR121) {
-      slider.init();  // Calls I2C Wire.begin(); for us
+      slider.init();  // Calls I2C Wire.begin() for us
     } else {
       Wire.begin();
     }
@@ -297,6 +305,7 @@ void setup()
     }
   } else {
     Wire.begin(SLAVE_I2C_ADDRESS);
+    Wire.onReceive(i2c_receive);
   }
 
   // 16mhz (Arduino Clock) / 8 (Prescalar) / 255 (Output Compare Register) / 64 (Software Counter)
@@ -312,21 +321,7 @@ void setup()
 
 void loop()
 {
-  uint8_t shelf_value = 0;  // 0-255
-
   if (master) {
-    Wire.beginTransmission(SLAVE_I2C_ADDRESS);
-    Wire.write(255);
-    Wire.endTransmission();
-    digitalWrite(13, HIGH);
-    delay(1000);
-    Wire.beginTransmission(SLAVE_I2C_ADDRESS);
-    Wire.write(0);
-    Wire.endTransmission();
-    digitalWrite(13, LOW);
-    delay(1000);
-    return;
-
     // We are the master
 
     // TODO: transact 8-bit ints from the slider to make things consistent
@@ -340,18 +335,6 @@ void loop()
     Wire.beginTransmission(0 /* broadcast address */);
     Wire.write(shelf_value);
     Wire.endTransmission();
-  } else {
-    // We are the slave
-    while(Wire.available())
-    {
-      shelf_value = Wire.read();
-      Serial.println(shelf_value);
-    }
-    if (shelf_value == 255) {
-      digitalWrite(13, HIGH);
-    } else {
-      digitalWrite(13, LOW);
-    }
   }
 
   for (int i = 0; i < NUM_SHELVES; i++) {
