@@ -11,8 +11,8 @@
 constexpr uint8_t PWM_STEPS = 64;  // NOTE: also change Shelf::set()
 
 // Slider tuning constants
-constexpr float A_MAX = -40.0;  // The "fully touched" value
-constexpr float B_MAX = -38.0;  // The B sensor is slightly weaker for some reason, probably the longer wire.
+constexpr float A_MAX = -48.0;  // The "fully touched" value
+constexpr float B_MAX = -48.0;
 constexpr size_t NUM_SMOOTHING_SAMPLES = 20;
 constexpr uint8_t LED_PINS[] = {4, 5, 6, 7, 8, 11};  // ELE9 and 10 have bugs
 constexpr uint8_t NUM_LEDS = (sizeof(LED_PINS) / sizeof(LED_PINS[0]));
@@ -161,9 +161,9 @@ private:
     if (touched)
     {
       value = ((b - a) + 1) / 2.0;
-      if (value < 0.1) {
+      if (value < 0.15) {
         value = 0.0;
-      } else if (value > 0.9) {
+      } else if (value > 0.85) {
         value = 1.0;
       }
     }
