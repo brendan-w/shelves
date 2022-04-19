@@ -8,7 +8,6 @@
 //
 // TUNING CONSTANTS
 //
-constexpr bool ENABLE_MPR121 = true;
 constexpr uint8_t PWM_STEPS = 64;  // NOTE: also change Shelf::set()
 
 // Slider tuning constants
@@ -46,8 +45,9 @@ public:
     }
   }
 
-  void set(uint8_t value) {
-    value_ = value >> 2;  // [0, 255] --> [0, 63]
+  void set(float value) {
+    const uint8_t MAX_VALUE = PWM_STEPS - 1;
+    value_ = max(0, min(fmap(value, 0.0, 1.0, 0, MAX_VALUE), MAX_VALUE));
   }
 
 private:
@@ -231,7 +231,7 @@ private:
 // GLOBALS
 //
 bool master = false;
-uint8_t shelf_value = 0;  // 0-255
+float light_value = 0.0;  // 0-1
 TouchSlider slider;
 
 // Used by the ISR to quickly set output pins
@@ -261,22 +261,23 @@ ISR(TIMER2_COMPA_vect)
   }
 }
 
-void uart_send(uint8_t value) {
+void uart_send(float value) {
+  const uint8_t int_value = round(fmap(value, 0.0, 1.0, 0, 255));
   Serial.write('[');
-  Serial.write(value);
+  Serial.write(int_value);
   Serial.write(']');
 }
 
-void uart_receive(uint8_t& value) {
+void uart_receive(float& value) {
   while (Serial.available() > 0) {
     int c = Serial.read();
     // If we find the start character, perform two more reads.
     // One for the value, and one for the end character.
     if (c == '[') {
-      uint8_t new_value = Serial.read();
+      const uint8_t new_value = Serial.read();
       if (Serial.read() == ']') {
         // End character found, commit the value
-        value = new_value;
+        value = fmap(new_value, 0, 255, 0.0, 1.0);
       } // else discard everything and carry on
     }
   }
@@ -295,9 +296,7 @@ void setup()
     // Display master LED
     digitalWrite(13, HIGH);
 
-    if (ENABLE_MPR121) {
-      slider.init();  // Calls I2C Wire.begin() for us
-    }
+    slider.init();
 
     for (uint8_t i = 0; i < NUM_SHELVES; i++) {
       pinMode(shelves[i].get_arduino_pin(), OUTPUT);
@@ -331,22 +330,24 @@ void loop()
 {
   if (master) {
     // We are the master
-
-    // TODO: transact 8-bit ints from the slider to make things consistent
-    static float value = 0;
-    slider.read(value);
-    slider.update_display(value);
-
-    // Convert to single byte [0-255] value
-    shelf_value = max(0, min(fmap(value, 0.0, 1.0, 0, 255), 255));
-    uart_send(shelf_value);
+    slider.read(light_value);
+    slider.update_display(light_value);
+    uart_send(light_value);
   } else {
-    uart_receive(shelf_value);
+    uart_receive(light_value);
   }
 
+  // The higher the shelf value, the more shelves turn on
+  constexpr float VALUE_PER_SHELF = 1.0 / NUM_SHELVES;
+  float value = light_value;
   for (int i = 0; i < NUM_SHELVES; i++) {
-    shelves[i].set(shelf_value);
+    shelves[i].set(min(fmap(value, 0, VALUE_PER_SHELF, 0.0, 1.0), 1.0));
+    value = max(0, value - VALUE_PER_SHELF);
   }
+
+  // for (int i = 0; i < NUM_SHELVES; i++) {
+  //   shelves[i].set(light_value);
+  // }
 
   delay(10);  // milliseconds
 }
