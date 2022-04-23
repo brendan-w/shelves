@@ -2,7 +2,7 @@
 #include <Wire.h>
 #include "src/MPR121/MPR121.h"  // https://github.com/BareConductive/mpr121.git
 
-//#define DEBUG_SERIAL
+//#define SLIDER_DEBUG_SERIAL
 
 //
 // TUNING CONSTANTS
@@ -13,8 +13,8 @@ constexpr uint8_t PWM_STEPS = 64;  // NOTE: also change Shelf::set()
 constexpr float A_MAX = -48.0;  // The "fully touched" value
 constexpr float B_MAX = -48.0;
 constexpr size_t NUM_SMOOTHING_SAMPLES = 20;
-constexpr uint8_t LED_PINS[] = {4, 5, 6, 7, 8, 11};  // ELE9 and 10 have bugs
-constexpr uint8_t NUM_LEDS = (sizeof(LED_PINS) / sizeof(LED_PINS[0]));
+constexpr uint8_t MPR121_LED_PINS[] = {4, 5, 6, 7, 8, 11};  // ELE9 and 10 have bugs
+constexpr uint8_t MPR121_NUM_LEDS = (sizeof(MPR121_LED_PINS) / sizeof(MPR121_LED_PINS[0]));
 
 
 float fmap(float x, float in_min, float in_max, float out_min, float out_max) {
@@ -71,7 +71,7 @@ public:
     MPR121.setGlobalCDC(63);
     MPR121.setNumDigPins(8);
 
-    for (int pin : LED_PINS) {
+    for (int pin : MPR121_LED_PINS) {
       MPR121.pinMode(pin, OUTPUT);
     }
 
@@ -109,12 +109,12 @@ public:
     value = max(0, min(value, 1.0));
 
     // Compute new LED values
-    uint8_t new_values[NUM_LEDS] = {0};
-    const uint8_t in_led = value * NUM_LEDS;  // integer flooring
+    uint8_t new_values[MPR121_NUM_LEDS] = {0};
+    const uint8_t in_led = value * MPR121_NUM_LEDS;  // integer flooring
     new_values[in_led] = 255;  // The LED that the value is in is always 100%
-    const float partial = (value * NUM_LEDS) - in_led;  // [0, 1) of where the value lands within the LED
+    const float partial = (value * MPR121_NUM_LEDS) - in_led;  // [0, 1) of where the value lands within the LED
 
-    if (partial > 0.5 && (in_led != (NUM_LEDS - 1)))
+    if (partial > 0.5 && (in_led != (MPR121_NUM_LEDS - 1)))
     {
       new_values[in_led + 1] = ((partial - 0.5) / 0.5) * 255;
     }
@@ -124,12 +124,12 @@ public:
     }
 
     // Commit the new states
-    for (uint8_t i = 0; i < NUM_LEDS; i++)
+    for (uint8_t i = 0; i < MPR121_NUM_LEDS; i++)
     {
       const uint8_t new_value = max(new_values[i], 0);
       if (led_values[i] != new_value)
       {
-        MPR121.analogWrite(LED_PINS[i], new_value);
+        MPR121.analogWrite(MPR121_LED_PINS[i], new_value);
         led_values[i] = new_value;
       }
     }
@@ -167,7 +167,7 @@ private:
       }
     }
 
-    #ifdef DEBUG_SERIAL
+    #ifdef SLIDER_DEBUG_SERIAL
     static uint8_t i = 0;
     if (i++ > 25)
     {
@@ -223,7 +223,7 @@ private:
   float history[NUM_SMOOTHING_SAMPLES] = {0.0};
 
   // LED information on the MPR121 display. Used for delta updates.
-  uint8_t led_values[NUM_LEDS];
+  uint8_t led_values[MPR121_NUM_LEDS];
 };
 
 //
@@ -331,7 +331,9 @@ void loop()
     // We are the master
     slider.read(light_value);
     slider.update_display(light_value);
+    #ifndef SLIDER_DEBUG_SERIAL
     uart_send(light_value);
+    #endif
   } else {
     uart_receive(light_value);
   }
@@ -343,10 +345,6 @@ void loop()
     shelves[i].set(min(fmap(value, 0, VALUE_PER_SHELF, 0.0, 1.0), 1.0));
     value = max(0, value - VALUE_PER_SHELF);
   }
-
-  // for (int i = 0; i < NUM_SHELVES; i++) {
-  //   shelves[i].set(light_value);
-  // }
 
   delay(10);  // milliseconds
 }
