@@ -1,7 +1,6 @@
 #include <Arduino.h>
-#include <MPR121.h>  // https://github.com/BareConductive/mpr121.git
-#include <MPR121_Datastream.h>
 #include <Wire.h>
+#include "src/MPR121/MPR121.h"  // https://github.com/BareConductive/mpr121.git
 
 //#define DEBUG_SERIAL
 
