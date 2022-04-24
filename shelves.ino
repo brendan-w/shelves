@@ -335,21 +335,10 @@ void setup()
     digitalWrite(13, HIGH);
 
     slider.init();
+    slider.update_display(0);
 
     for (uint8_t i = 0; i < NUM_SHELVES; i++) {
       pinMode(shelves[i].get_arduino_pin(), OUTPUT);
-    }
-
-    for (float v = 0.0; v <= 1.0; v += 0.05)
-    {
-      slider.update_display(v);
-      delay(8);
-    }
-
-    for (float v = 1.0; v >= 0.0; v -= 0.05)
-    {
-      slider.update_display(v);
-      delay(8);
     }
   }
 
