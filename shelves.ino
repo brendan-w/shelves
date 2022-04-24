@@ -15,7 +15,7 @@ constexpr float B_MAX = -48.0;
 constexpr size_t NUM_SMOOTHING_SAMPLES = 20;
 constexpr uint8_t MPR121_LED_PINS[] = {4, 5, 6, 7, 8, 11};  // ELE9 and 10 have bugs
 constexpr uint8_t MPR121_NUM_LEDS = (sizeof(MPR121_LED_PINS) / sizeof(MPR121_LED_PINS[0]));
-constexpr unsigned long TAP_MIN_MS = 50;
+constexpr unsigned long TAP_MIN_MS = 30;
 constexpr unsigned long TAP_MAX_MS = 300;
 
 
