@@ -15,6 +15,8 @@ constexpr float B_MAX = -48.0;
 constexpr size_t NUM_SMOOTHING_SAMPLES = 20;
 constexpr uint8_t MPR121_LED_PINS[] = {4, 5, 6, 7, 8, 11};  // ELE9 and 10 have bugs
 constexpr uint8_t MPR121_NUM_LEDS = (sizeof(MPR121_LED_PINS) / sizeof(MPR121_LED_PINS[0]));
+constexpr unsigned long TAP_MIN_MS = 50;
+constexpr unsigned long TAP_MAX_MS = 300;
 
 
 float fmap(float x, float in_min, float in_max, float out_min, float out_max) {
@@ -93,7 +95,40 @@ public:
       Serial.println("MPR121 Not inited: Refusing to read");
       return false;
     }
+
+    // Raw slider read
     bool touched = read_raw_slider(current_value);
+
+    // Tap detection. Look for touch begin/end
+    if (touched && !last_touched_) {
+      // Tap begin
+      touch_start_ms_ = millis();
+    } else if (!touched && last_touched_) {
+      // Tap end
+      const unsigned long now_ms = millis();
+
+      // millis() rolls over after ~50 days. It's very unlikely that this
+      // will happen during our touch, but just in case, let's catch it.
+      // This code assumes that a tap is <50 days long.
+      unsigned long touch_duration_ms = 0;
+      if (now_ms < touch_start_ms_) {
+        constexpr unsigned long MILLIS_MAX = -1;
+        touch_duration_ms = (MILLIS_MAX - touch_start_ms_) + now_ms;
+      } else {
+        // The simple case
+        touch_duration_ms = now_ms - touch_start_ms_;
+      }
+
+      if ((touch_duration_ms >= TAP_MIN_MS) && (touch_duration_ms <= TAP_MAX_MS)) {
+        // We've received a tap. Send the light value to the side that the user tapped
+        current_value = current_value < 0.5 ? 0.0 : 1.0;
+      }
+    }
+
+    last_touched_ = touched;
+
+    // Smooth the output values
+    // TODO: this shouldn't be in the slider class
     value = rolling_filter_value(current_value);
     return touched;
   }
@@ -219,11 +254,15 @@ private:
   float current_value = 0.0;
 
   // The history buffer used to smooth and LERP the value around on the slider
+  // TODO: we should be able to do this with flat LERP math instead of an array. Not sure why I did it this way...
   size_t history_cursor = 0;
   float history[NUM_SMOOTHING_SAMPLES] = {0.0};
 
   // LED information on the MPR121 display. Used for delta updates.
-  uint8_t led_values[MPR121_NUM_LEDS];
+  uint8_t led_values[MPR121_NUM_LEDS] = {};
+
+  bool last_touched_ = false;  // used for touch start/end edge detection
+  unsigned long touch_start_ms_ = 0;
 };
 
 //
