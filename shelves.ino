@@ -8,21 +8,26 @@
 // TUNING CONSTANTS
 //
 constexpr uint8_t PWM_STEPS = 64;  // NOTE: also change Shelf::set()
+constexpr size_t NUM_SMOOTHING_SAMPLES = 20;
 
 // Slider tuning constants
 constexpr float A_MAX = -48.0;  // The "fully touched" value
 constexpr float B_MAX = -48.0;
-constexpr size_t NUM_SMOOTHING_SAMPLES = 20;
 constexpr uint8_t MPR121_LED_PINS[] = {4, 5, 6, 7, 8, 11};  // ELE9 and 10 have bugs
 constexpr uint8_t MPR121_NUM_LEDS = (sizeof(MPR121_LED_PINS) / sizeof(MPR121_LED_PINS[0]));
 constexpr unsigned long TAP_MIN_MS = 30;
 constexpr unsigned long TAP_MAX_MS = 300;
+constexpr float DISPLAY_IDLE_BRIGHTNESS = 0.1;
+constexpr float DISPLAY_FADE_INCREMENT = 0.01;
 
 
 float fmap(float x, float in_min, float in_max, float out_min, float out_max) {
   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
+/**
+ * Configuration and control for a single LED output channel
+ */
 class Shelf {
 public:
   Shelf(volatile uint8_t& port, uint8_t bit, uint8_t arduino_pin)
@@ -59,6 +64,9 @@ private:
   volatile uint8_t value_ = 0;
 };
 
+/**
+ * Handles reading from the two touch slider strips and updating the display on the MPR121
+ */
 class TouchSlider {
 public:
   void init() {
@@ -126,16 +134,15 @@ public:
     }
 
     last_touched_ = touched;
-
-    // Smooth the output values
-    // TODO: this shouldn't be in the slider class
-    value = rolling_filter_value(current_value_);
+    value = current_value_;
     return touched;
   }
 
   // Simple display update routine that performs delta updates to only
   // the needed LED's. I found the I2C requests to be slow.
-  void update_display(float value) {
+  //   value      [0.0, 1.0]
+  //   brightness [0.0, 1.0]
+  void update_display(float value, float brightness) {
     if(!MPR121.isInited()) {
       Serial.println("MPR121 Not inited: Refusing to update display");
       return;
@@ -146,16 +153,16 @@ public:
     // Compute new LED values
     uint8_t new_values[MPR121_NUM_LEDS] = {0};
     const uint8_t in_led = value * MPR121_NUM_LEDS;  // integer flooring
-    new_values[in_led] = 255;  // The LED that the value is in is always 100%
+    new_values[in_led] = brightness * 255;  // The LED that the value is in is always 100%
     const float partial = (value * MPR121_NUM_LEDS) - in_led;  // [0, 1) of where the value lands within the LED
 
     if (partial > 0.5 && (in_led != (MPR121_NUM_LEDS - 1)))
     {
-      new_values[in_led + 1] = ((partial - 0.5) / 0.5) * 255;
+      new_values[in_led + 1] = ((partial - 0.5) / 0.5) * brightness * 255;
     }
     else if (partial < 0.5 && (in_led != 0))
     {
-      new_values[in_led - 1] = ((-1.0 * (partial / 0.5)) + 1.0) * 255;
+      new_values[in_led - 1] = ((-1.0 * (partial / 0.5)) + 1.0) * brightness * 255;
     }
 
     // Commit the new states
@@ -223,14 +230,31 @@ private:
     return touched;
   }
 
-  /**
-   * Adds the value to a simple rolling window average filter.
-   * This not only smoothes out some of the jitter in the value,
-   * but also gives it some nice inertia/LERPing when transitioning
-   * between distant values.
-   */
-  float rolling_filter_value(float value)
-  {
+private:
+  // Ambient un-touched capacitance values. Anything beyond which is a touch.
+  int nominal_a_value_ = 0;
+  int nominal_b_value_ = 0;
+
+  // The current un-smoothed target value of the slider
+  float current_value_ = 0.0;
+
+  // LED information on the MPR121 display. Used for delta updates.
+  uint8_t led_values_[MPR121_NUM_LEDS] = {};
+
+  bool last_touched_ = false;  // used for touch start/end edge detection
+  unsigned long touch_start_ms_ = 0;
+};
+
+
+/**
+ * Simple rolling window average filter.
+ * This not only smoothes out some of the jitter in the value,
+ * but also gives it some nice inertia/LERPing when transitioning
+ * between distant values.
+ */
+class Smoother {
+public:
+  float operator()(float value) {
     history_[history_cursor_++] = value;
     if (history_cursor_ >= NUM_SMOOTHING_SAMPLES)
     {
@@ -246,31 +270,19 @@ private:
   }
 
 private:
-  // Ambient un-touched capacitance values. Anything beyond which is a touch.
-  int nominal_a_value_ = 0;
-  int nominal_b_value_ = 0;
-
-  // The current un-smoothed target value of the slider
-  float current_value_ = 0.0;
-
   // The history buffer used to smooth and LERP the value around on the slider
-  // TODO: we should be able to do this with flat LERP math instead of an array. Not sure why I did it this way...
   size_t history_cursor_ = 0;
   float history_[NUM_SMOOTHING_SAMPLES] = {0.0};
-
-  // LED information on the MPR121 display. Used for delta updates.
-  uint8_t led_values_[MPR121_NUM_LEDS] = {};
-
-  bool last_touched_ = false;  // used for touch start/end edge detection
-  unsigned long touch_start_ms_ = 0;
 };
+
 
 //
 // GLOBALS
 //
 bool master = false;
-float light_value = 0.0;  // 0-1
 TouchSlider slider;
+Smoother smoother;
+float display_brightness = DISPLAY_IDLE_BRIGHTNESS;
 
 // Used by the ISR to quickly set output pins
 Shelf shelves[] = {
@@ -335,7 +347,7 @@ void setup()
     digitalWrite(13, HIGH);
 
     slider.init();
-    slider.update_display(0);
+    slider.update_display(0, DISPLAY_IDLE_BRIGHTNESS);
 
     for (uint8_t i = 0; i < NUM_SHELVES; i++) {
       pinMode(shelves[i].get_arduino_pin(), OUTPUT);
@@ -355,10 +367,24 @@ void setup()
 
 void loop()
 {
+  float light_value = 0.0;
+
   if (master) {
     // We are the master
-    slider.read(light_value);
-    slider.update_display(light_value);
+    float slider_value = 0.0;
+    const bool touched = slider.read(slider_value);
+    light_value = smoother(slider_value);
+    const bool value_achieved = (light_value == slider_value);
+
+    if (touched) {
+      display_brightness = 1.0;
+    } else if (value_achieved && display_brightness > DISPLAY_IDLE_BRIGHTNESS) {
+      // Fade out the display slowly once the touch is released and the slider is done sliding
+      display_brightness -= DISPLAY_FADE_INCREMENT;
+      display_brightness = max(0, display_brightness);
+    }
+
+    slider.update_display(light_value, display_brightness);
     #ifndef SLIDER_DEBUG_SERIAL
     uart_send(light_value);
     #endif
