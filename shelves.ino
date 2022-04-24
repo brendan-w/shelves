@@ -86,8 +86,8 @@ public:
       return;
     }
     MPR121.updateFilteredData();
-    nominal_a_value = MPR121.getFilteredData(0);
-    nominal_b_value = MPR121.getFilteredData(1);
+    nominal_a_value_ = MPR121.getFilteredData(0);
+    nominal_b_value_ = MPR121.getFilteredData(1);
   }
 
   bool read(float& value) {
@@ -97,7 +97,7 @@ public:
     }
 
     // Raw slider read
-    bool touched = read_raw_slider(current_value);
+    bool touched = read_raw_slider(current_value_);
 
     // Tap detection. Look for touch begin/end
     if (touched && !last_touched_) {
@@ -121,7 +121,7 @@ public:
 
       if ((touch_duration_ms >= TAP_MIN_MS) && (touch_duration_ms <= TAP_MAX_MS)) {
         // We've received a tap. Send the light value to the side that the user tapped
-        current_value = current_value < 0.5 ? 0.0 : 1.0;
+        current_value_ = current_value_ < 0.5 ? 0.0 : 1.0;
       }
     }
 
@@ -129,7 +129,7 @@ public:
 
     // Smooth the output values
     // TODO: this shouldn't be in the slider class
-    value = rolling_filter_value(current_value);
+    value = rolling_filter_value(current_value_);
     return touched;
   }
 
@@ -162,10 +162,10 @@ public:
     for (uint8_t i = 0; i < MPR121_NUM_LEDS; i++)
     {
       const uint8_t new_value = max(new_values[i], 0);
-      if (led_values[i] != new_value)
+      if (led_values_[i] != new_value)
       {
         MPR121.analogWrite(MPR121_LED_PINS[i], new_value);
-        led_values[i] = new_value;
+        led_values_[i] = new_value;
       }
     }
   }
@@ -181,8 +181,8 @@ private:
     MPR121.updateFilteredData();
 
     // Read sensor data and normalize to [0,1] (0 = not touched, 1 = touched)
-    float a = (MPR121.getFilteredData(0) - nominal_a_value) / A_MAX;
-    float b = (MPR121.getFilteredData(1) - nominal_b_value) / B_MAX;
+    float a = (MPR121.getFilteredData(0) - nominal_a_value_) / A_MAX;
+    float b = (MPR121.getFilteredData(1) - nominal_b_value_) / B_MAX;
     a = constrain(a, 0.0, 1.0);
     b = constrain(b, 0.0, 1.0);
 
@@ -231,35 +231,35 @@ private:
    */
   float rolling_filter_value(float value)
   {
-    history[history_cursor++] = value;
-    if (history_cursor >= NUM_SMOOTHING_SAMPLES)
+    history_[history_cursor_++] = value;
+    if (history_cursor_ >= NUM_SMOOTHING_SAMPLES)
     {
-      history_cursor = 0;
+      history_cursor_ = 0;
     }
 
     float v = 0.0;
     for (size_t i = 0; i < NUM_SMOOTHING_SAMPLES; i++)
     {
-      v += history[i];
+      v += history_[i];
     }
     return v / NUM_SMOOTHING_SAMPLES;
   }
 
 private:
   // Ambient un-touched capacitance values. Anything beyond which is a touch.
-  int nominal_a_value = 0;
-  int nominal_b_value = 0;
+  int nominal_a_value_ = 0;
+  int nominal_b_value_ = 0;
 
   // The current un-smoothed target value of the slider
-  float current_value = 0.0;
+  float current_value_ = 0.0;
 
   // The history buffer used to smooth and LERP the value around on the slider
   // TODO: we should be able to do this with flat LERP math instead of an array. Not sure why I did it this way...
-  size_t history_cursor = 0;
-  float history[NUM_SMOOTHING_SAMPLES] = {0.0};
+  size_t history_cursor_ = 0;
+  float history_[NUM_SMOOTHING_SAMPLES] = {0.0};
 
   // LED information on the MPR121 display. Used for delta updates.
-  uint8_t led_values[MPR121_NUM_LEDS] = {};
+  uint8_t led_values_[MPR121_NUM_LEDS] = {};
 
   bool last_touched_ = false;  // used for touch start/end edge detection
   unsigned long touch_start_ms_ = 0;
